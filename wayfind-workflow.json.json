@@ -1,0 +1,512 @@
+{
+  "name": "wayfind-workflow.json",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c9a8a102-c30e-43c3-9b0e-39ebdeb5225c",
+      "name": "Manual Trigger (test run)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1104,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst countryRestrictionPatterns = [\n  /\\bUS[- ]?only\\b/i, /\\bUSA?\\s+resident/i,\n  /\\bmust be (authorized|eligible) to work in the (us|united states|uk|eu)\\b/i,\n  /\\bno\\s+(h1b|sponsorship|visa sponsorship)\\b/i,\n  /\\b401\\(?k\\)?\\b/i, /\\bHSA\\b/i, /\\beu\\s+only\\b/i, /\\bindia\\s+only\\b/i,\n  /\\bpan[- ]india\\b/i, /\\bcountries of europe or ukraine\\b/i,\n  /\\bmust be based in\\b/i, /\\brelocat(e|ion) to\\b/i,\n  /\\bwithin \\d+ (hours?|hrs?) of (est|pst|cst|gmt)\\b/i\n];\nconst seniorityRedFlags = [\n  /\\bsenior\\b/i, /\\bstaff\\b/i, /\\blead\\s+(engineer|developer)\\b/i,\n  /\\bprincipal\\b/i, /\\b(5|6|7|8|9|10)\\+?\\s*years?\\b/i,\n  /\\bat least (4|5|6|7|8) years?\\b/i\n];\nconst degreeRedFlags = [\n  /\\brequires? a (bachelor|master|phd)('s)? degree\\b/i,\n  /\\bdegree in computer science required\\b/i\n];\nconst stackRedFlags = [\n  /\\bpython\\s+(is\\s+)?(required|core|primary|expertise)\\b/i,\n  /\\bexpertise in python\\b/i, /\\bflutter\\b/i, /\\bdart\\b/i\n];\nfunction checkFlags(text, patterns) {\n  if (!text) return [];\n  return patterns.filter(p => p.test(text)).map(p => p.source);\n}\nfunction stripBoilerplate(text) {\n  if (!text) return text;\n  const contentMarkers = [\n    /##\\s*Description/i,\n    /##\\s*About the [Rr]ole/i,\n    /\\[Skip to content\\]/i,\n    /#\\s*Careers at/i\n  ];\n  let earliestIndex = -1;\n  for (const marker of contentMarkers) {\n    const match = text.match(marker);\n    if (match && match.index !== undefined) {\n      if (earliestIndex === -1 || match.index < earliestIndex) {\n        earliestIndex = match.index;\n      }\n    }\n  }\n  if (earliestIndex > -1) {\n    return text.slice(earliestIndex).trim();\n  }\n  return text;\n}\nreturn items.map(item => {\n  const rawCombined = item.json.title + ' ' + (item.json.description || '');\n  const text = stripBoilerplate(rawCombined);\n  const countryFlags = checkFlags(text, countryRestrictionPatterns);\n  const seniorityFlags = checkFlags(text, seniorityRedFlags);\n  const degreeFlags = checkFlags(text, degreeRedFlags);\n  const stackFlags = checkFlags(text, stackRedFlags);\n  const totalFlags = countryFlags.length + seniorityFlags.length + degreeFlags.length + stackFlags.length;\n  return {\n    json: {\n      company: item.json.name,\n      careersUrl: item.json.careersUrl || item.json.applicationLink || item.json.apply_url || item.json.url || null,\n      raw_text: text.slice(0, 8000),\n      pre_filter_verdict: totalFlags === 0 ? 'PASSES_KEYWORD_FILTER' : 'FLAGGED',\n      flags_found: { country: countryFlags, seniority: seniorityFlags, degree: degreeFlags, stack: stackFlags }\n    }\n  };\n});"
+      },
+      "id": "f18f2f92-5a5b-44db-b760-9014babd8456",
+      "name": "Filter - Red Flag Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst originalData = $('Filter - Red Flag Keywords').all();\n\nreturn items.map((item) => {\n  let parsed;\n  try {\n    const rawText = item.json.choices?.[0]?.message?.content || '{}';\n    parsed = JSON.parse(rawText);\n  } catch (e) {\n    parsed = { company: 'unknown', verdict: 'PARSE_ERROR', matching_role_title: null, reason: 'OpenAI response was not valid JSON - check manually' };\n  }\n  // Match by company name instead of array index - safer if item order/count\n  // ever differs between nodes.\n  const match = originalData.find(d => d.json.company === parsed.company);\n  parsed.careersUrl = match?.json?.careersUrl || null;\n  return { json: parsed };\n});"
+      },
+      "id": "68f95997-88f6-491d-89dd-bb826e9b0c20",
+      "name": "Parse Final Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Only pass through NEW matches worth reporting.\n// Filters out NO_MATCH and PARSE_ERROR so the report only shows real leads.\nconst items = $input.all();\nreturn items.filter(item => \n  item.json.verdict === 'MATCH' || item.json.verdict === 'UNCLEAR_NEEDS_HUMAN_CHECK'\n);"
+      },
+      "id": "c4dc88ef-4b1f-4313-b6c0-109e0489f8cc",
+      "name": "Keep Only MATCH / UNCLEAR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kuksfjyyixfgublinfum.supabase.co/rest/v1/wayfind_companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"company\": $json.company, \"verdict\": $json.verdict, \"matching_role_title\": $json.matching_role_title, \"reason\": $json.reason, \"checked_at\": $now.toISO() } }}",
+        "options": {}
+      },
+      "id": "e50ba171-3755-4a92-8e6c-ab261b8442f2",
+      "name": "Supabase - Store Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        704,
+        224
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "AsnHmLTXpYKoraEC",
+          "name": "Custom Auth account"
+        }
+      },
+      "notes": "Auth: Header Auth credential with TWO headers needed - 'apikey' = your Supabase anon/service key, and 'Authorization' = 'Bearer YOUR_SUPABASE_KEY'. Replace YOUR_PROJECT_REF in the URL with your actual Supabase project reference."
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst date = new Date().toISOString().split('T')[0];\n\nlet report = `# Wayfind Report - ${date}\\n\\n`;\nreport += `${items.length} potential match(es) found this run.\\n\\n`;\n\nitems.forEach(item => {\n  const j = item.json;\n  report += `## ${j.company}\\n`;\n  report += `- **Verdict:** ${j.verdict}\\n`;\n  report += `- **Role:** ${j.matching_role_title || 'not specified'}\\n`;\n  report += `- **Apply:** ${j.careersUrl || 'link not available'}\\n`;\n  report += `- **Reason:** ${j.reason}\\n\\n`;\n});\n\nif (items.length === 0) {\n  report += 'No new matches this run.\\n';\n}\n\nreturn [{ json: { report_markdown: report, date } }];"
+      },
+      "id": "dae50614-9a7b-43e2-a159-937e6f34f1fa",
+      "name": "Build Report Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "folderId": "default",
+        "title": "={{ \"Wayfind Report - \" + $json.date }}"
+      },
+      "id": "a741b390-d1d7-4bda-baa7-bf6d4c46a5db",
+      "name": "Google Docs - Create Report",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        640,
+        432
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "z4PzWVI5oLF5u5TU",
+          "name": "Google Docs account"
+        }
+      },
+      "notes": "Requires Google OAuth2 credential - connect your Google account in n8n (free, no card needed). This creates a new Doc; a follow-up 'Update' call inserts report_markdown as the body text."
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0BTJRFQ9KQ",
+          "mode": "list",
+          "cachedResultName": "all-haider39s-org"
+        },
+        "text": "={{ \"Wayfind found \" + $('Keep Only MATCH / UNCLEAR').all().length + \" potential match(es) today. Check the Doc: \" + $json.documentUrl }}",
+        "otherOptions": {}
+      },
+      "id": "67b50792-bbb7-41a0-a06f-c40bd1c9477c",
+      "name": "Slack - Send Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        1008,
+        400
+      ],
+      "webhookId": "6a50c568-90b5-44f1-8d4a-3d43b1cc44c1",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "hXk6H3QLxsUFlgAs",
+          "name": "Slack account"
+        }
+      },
+      "notes": "Requires Slack OAuth2 credential (free) - create a simple Slack app or use n8n's built-in Slack connection. Set YOUR_SLACK_CHANNEL_ID to your actual channel."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"gpt-4o-mini\", \"messages\": [ { \"role\": \"user\", \"content\": \"You are screening a job posting for this candidate: Haider Ali, self-taught GenAI/full-stack engineer, Sialkot Pakistan, ~1 year experience. Stack: Next.js, TypeScript, React, Node.js, LangChain/LangGraph, PostgreSQL. HARD EXCLUSIONS: no Python-core roles, no Flutter/Dart, no hard degree requirement, must be worldwide-remote OR Pakistan-based (reject US-only/EU-only/India-only), no Senior/Staff/Lead/Principal titles or 3+ years required roles.\\n\\nA keyword pre-filter already ran on this text and found these flags: \" + JSON.stringify($json.flags_found) + \"\\n\\nPre-filter verdict: \" + $json.pre_filter_verdict + \"\\n\\nRaw scraped text from \" + $json.company + \"'s careers page:\\n\" + $json.raw_text + \"\\n\\nRead the actual text yourself (don't just trust the keyword flags, they can have false positives). Respond ONLY with valid JSON in this exact shape, no other text, no markdown code fences: { \\\"company\\\": string, \\\"verdict\\\": \\\"MATCH\\\" | \\\"NO_MATCH\\\" | \\\"UNCLEAR_NEEDS_HUMAN_CHECK\\\", \\\"matching_role_title\\\": string or null, \\\"reason\\\": string (one sentence) }\" } ], \"response_format\": { \"type\": \"json_object\" } } }}",
+        "options": {}
+      },
+      "id": "a3d2550b-bbca-41fe-83ec-e650720f4f5f",
+      "name": "OpenAI - Verify & Synthesize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        -144
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iBLWKF6wi6Y3qSIL",
+          "name": "OpenAI Auth"
+        }
+      },
+      "notes": "Auth: Header Auth credential, header name 'x-api-key', value = your raw Anthropic API key (no 'Bearer ' prefix - Anthropic uses x-api-key header, not Authorization)"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $('Google Docs - Create Report').item.json.id }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Build Report Text').item.json.report_markdown }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        800,
+        384
+      ],
+      "id": "6e7fda2f-1e55-4079-931c-862bad0f221c",
+      "name": "Update a document",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "z4PzWVI5oLF5u5TU",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://remoteok.com/api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -848,
+        -384
+      ],
+      "id": "8751a714-7692-421f-91ad-a1de23a8d75e",
+      "name": "RemoteOK Fetch"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allInput = $input.all();\nlet remoteOkJobs = [];\nlet remotiveJobs = [];\nlet himalayasJobs = [];\n\nfor (const item of allInput) {\n  const data = item.json;\n  if (data.company) {\n    remoteOkJobs.push(data);\n  } else if (data.jobs && Array.isArray(data.jobs)) {\n    const firstJob = data.jobs[0] || {};\n    if (firstJob.companyName !== undefined) {\n      himalayasJobs = data.jobs;\n    } else {\n      remotiveJobs = data.jobs;\n    }\n  }\n}\n\nfunction titleOk(title) {\n  const t = (title || '').toLowerCase();\n  const senior = /senior|staff|lead|principal|director|manager/.test(t);\n  const relevant = /engineer|developer|full.?stack|frontend|backend/.test(t);\n  return !senior && relevant;\n}\n\nconst fromRemoteOk = remoteOkJobs\n  .filter(job => job.company && (!job.location || job.location.trim() === '') && titleOk(job.position))\n  .map(job => ({ json: { name: job.company, careersUrl: job.apply_url, title: job.position, description: job.description || '' } }));\n\nconst fromRemotive = remotiveJobs\n  .filter(job => titleOk(job.title))\n  .map(job => ({ json: { name: job.company_name, careersUrl: job.url, title: job.title, description: job.description || '' } }));\n\nconst fromHimalayas = himalayasJobs\n  .filter(job => titleOk(job.title))\n  .map(job => ({\n    json: {\n      name: job.companyName || 'Unknown (Himalayas)',\n      careersUrl: job.companySlug\n        ? `https://himalayas.app/companies/${job.companySlug}`\n        : `https://himalayas.app/jobs?q=${encodeURIComponent(job.companyName || job.title)}`,\n      title: job.title,\n      description: job.excerpt || ''\n    }\n  }));\n\nreturn [...fromRemoteOk, ...fromRemotive, ...fromHimalayas];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        -160
+      ],
+      "id": "309802b5-f318-4217-8b2e-4f4e970b2288",
+      "name": "Filter Real Jobs"
+    },
+    {
+      "parameters": {
+        "url": "https://kuksfjyyixfgublinfum.supabase.co/rest/v1/wayfind_companies?select=company",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3db5150b-7c44-490c-916e-90ca13323bcd",
+      "name": "Supabase - Get Checked Companies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -160
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "AsnHmLTXpYKoraEC",
+          "name": "Custom Auth account"
+        }
+      },
+      "notes": "Auth: Header Auth credential with TWO headers needed - 'apikey' = your Supabase anon/service key, and 'Authorization' = 'Bearer YOUR_SUPABASE_KEY'. Replace YOUR_PROJECT_REF in the URL with your actual Supabase project reference."
+    },
+    {
+      "parameters": {
+        "jsCode": "const newJobs = $('Filter Real Jobs').all();\nconst alreadyChecked = $input.all().map(item => item.json.company);\n\nconst filtered = newJobs.filter(job => !alreadyChecked.includes(job.json.name));\nreturn filtered;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -144
+      ],
+      "id": "6627a12e-2db9-4876-9c9f-4f62d3447953",
+      "name": "Skip Already-Checked"
+    },
+    {
+      "parameters": {
+        "url": "https://remotive.com/api/remote-jobs?category=software-dev",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -848,
+        -208
+      ],
+      "id": "e8aa1314-4e1d-45f4-8be3-266b90cd74ce",
+      "name": "Remotive Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://himalayas.app/jobs/api/search?keywords=full+stack+engineer&seniority=entry-level,mid-level",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -848,
+        -16
+      ],
+      "id": "b09e0aec-689f-48d7-921d-4f62dcd4134b",
+      "name": "Himalayas Fetch"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger (test run)": {
+      "main": [
+        [
+          {
+            "node": "RemoteOK Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remotive Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Himalayas Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter - Red Flag Keywords": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Verify & Synthesize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Only MATCH / UNCLEAR": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Store Result",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Report Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report Text": {
+      "main": [
+        [
+          {
+            "node": "Google Docs - Create Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Docs - Create Report": {
+      "main": [
+        [
+          {
+            "node": "Update a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Final Verdict": {
+      "main": [
+        [
+          {
+            "node": "Keep Only MATCH / UNCLEAR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Verify & Synthesize": {
+      "main": [
+        [
+          {
+            "node": "Parse Final Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a document": {
+      "main": [
+        [
+          {
+            "node": "Slack - Send Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RemoteOK Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Real Jobs": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Get Checked Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Get Checked Companies": {
+      "main": [
+        [
+          {
+            "node": "Skip Already-Checked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Already-Checked": {
+      "main": [
+        [
+          {
+            "node": "Filter - Red Flag Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remotive Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Himalayas Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "235e2ed1-578c-4eb9-a6f3-24457c7e94c3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a5dd9b336671e659366774e67e75f51dcc2e039066556d7e72f0bc6819c268e6"
+  },
+  "nodeGroups": [],
+  "id": "KIyfB33EGpISCree",
+  "tags": []
+}
