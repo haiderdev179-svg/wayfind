@@ -8,8 +8,8 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -1104,
-        -176
+        -1664,
+        -64
       ]
     },
     {
@@ -21,21 +21,21 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        48,
-        -144
+        736,
+        -272
       ]
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all();\nconst originalData = $('Filter - Red Flag Keywords').all();\n\nreturn items.map((item) => {\n  let parsed;\n  try {\n    const rawText = item.json.choices?.[0]?.message?.content || '{}';\n    parsed = JSON.parse(rawText);\n  } catch (e) {\n    parsed = { company: 'unknown', verdict: 'PARSE_ERROR', matching_role_title: null, reason: 'OpenAI response was not valid JSON - check manually' };\n  }\n  // Match by company name instead of array index - safer if item order/count\n  // ever differs between nodes.\n  const match = originalData.find(d => d.json.company === parsed.company);\n  parsed.careersUrl = match?.json?.careersUrl || null;\n  return { json: parsed };\n});"
+        "jsCode": "const items = $input.all();\nconst originalData = $('Filter - Red Flag Keywords').all();\n\nreturn items.map((item, index) => {\n  let parsed;\n  try {\n    const rawText = item.json.choices?.[0]?.message?.content || '{}';\n    parsed = JSON.parse(rawText);\n  } catch (e) {\n    parsed = { company: 'unknown', verdict: 'PARSE_ERROR', matching_role_title: null, reason: 'OpenAI response was not valid JSON - check manually' };\n  }\n  const match = originalData[index];\n  parsed.careersUrl = match?.json?.careersUrl || null;\n  parsed.originalName = match?.json?.name || parsed.company;\n  return { json: parsed };\n});"
       },
       "id": "68f95997-88f6-491d-89dd-bb826e9b0c20",
       "name": "Parse Final Verdict",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        560,
-        -144
+        1168,
+        -320
       ]
     },
     {
@@ -47,14 +47,14 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        464,
-        176
+        1152,
+        -16
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://kuksfjyyixfgublinfum.supabase.co/rest/v1/wayfind_companies",
+        "url": "https://kuksfjyyixfgublinfum.supabase.co/rest/v1/wayfind_companies?on_conflict=company",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpCustomAuth",
         "sendHeaders": true,
@@ -67,12 +67,16 @@
             {
               "name": "Prefer",
               "value": "resolution=merge-duplicates"
+            },
+            {
+              "name": "Range",
+              "value": "0-9999"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { \"company\": $json.company, \"verdict\": $json.verdict, \"matching_role_title\": $json.matching_role_title, \"reason\": $json.reason, \"checked_at\": $now.toISO() } }}",
+        "jsonBody": "={{ { \"company\": $json.originalName, \"verdict\": $json.verdict, \"matching_role_title\": $json.matching_role_title, \"reason\": $json.reason, \"checked_at\": $now.toISO() } }}",
         "options": {}
       },
       "id": "e50ba171-3755-4a92-8e6c-ab261b8442f2",
@@ -80,8 +84,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        704,
-        224
+        1504,
+        -416
       ],
       "credentials": {
         "httpCustomAuth": {
@@ -100,22 +104,30 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        432,
-        416
+        848,
+        240
       ]
     },
     {
       "parameters": {
-        "folderId": "default",
-        "title": "={{ \"Wayfind Report - \" + $json.date }}"
+        "operation": "update",
+        "documentURL": "182z4lzRLi7_QWf9oKLQqbBCS3gXHR6C2J4yufSeXzsw",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "=   {{ \"\\n\\n---\\n\\n\" + $json.report_markdown }}"
+            }
+          ]
+        }
       },
       "id": "a741b390-d1d7-4bda-baa7-bf6d4c46a5db",
       "name": "Google Docs - Create Report",
       "type": "n8n-nodes-base.googleDocs",
       "typeVersion": 2,
       "position": [
-        640,
-        432
+        1056,
+        240
       ],
       "credentials": {
         "googleDocsOAuth2Api": {
@@ -143,8 +155,8 @@
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
       "position": [
-        1008,
-        400
+        1280,
+        240
       ],
       "webhookId": "6a50c568-90b5-44f1-8d4a-3d43b1cc44c1",
       "credentials": {
@@ -180,8 +192,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        272,
-        -144
+        944,
+        -304
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -193,55 +205,36 @@
     },
     {
       "parameters": {
-        "operation": "update",
-        "documentURL": "={{ $('Google Docs - Create Report').item.json.id }}",
-        "actionsUi": {
-          "actionFields": [
+        "url": "https://remoteok.com/api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
             {
-              "action": "insert",
-              "text": "={{ $('Build Report Text').item.json.report_markdown }}"
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             }
           ]
-        }
-      },
-      "type": "n8n-nodes-base.googleDocs",
-      "typeVersion": 2,
-      "position": [
-        800,
-        384
-      ],
-      "id": "6e7fda2f-1e55-4079-931c-862bad0f221c",
-      "name": "Update a document",
-      "credentials": {
-        "googleDocsOAuth2Api": {
-          "id": "z4PzWVI5oLF5u5TU",
-          "name": "Google Docs account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "url": "https://remoteok.com/api",
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        -848,
-        -384
+        -912,
+        -416
       ],
       "id": "8751a714-7692-421f-91ad-a1de23a8d75e",
       "name": "RemoteOK Fetch"
     },
     {
       "parameters": {
-        "jsCode": "const allInput = $input.all();\nlet remoteOkJobs = [];\nlet remotiveJobs = [];\nlet himalayasJobs = [];\n\nfor (const item of allInput) {\n  const data = item.json;\n  if (data.company) {\n    remoteOkJobs.push(data);\n  } else if (data.jobs && Array.isArray(data.jobs)) {\n    const firstJob = data.jobs[0] || {};\n    if (firstJob.companyName !== undefined) {\n      himalayasJobs = data.jobs;\n    } else {\n      remotiveJobs = data.jobs;\n    }\n  }\n}\n\nfunction titleOk(title) {\n  const t = (title || '').toLowerCase();\n  const senior = /senior|staff|lead|principal|director|manager/.test(t);\n  const relevant = /engineer|developer|full.?stack|frontend|backend/.test(t);\n  return !senior && relevant;\n}\n\nconst fromRemoteOk = remoteOkJobs\n  .filter(job => job.company && (!job.location || job.location.trim() === '') && titleOk(job.position))\n  .map(job => ({ json: { name: job.company, careersUrl: job.apply_url, title: job.position, description: job.description || '' } }));\n\nconst fromRemotive = remotiveJobs\n  .filter(job => titleOk(job.title))\n  .map(job => ({ json: { name: job.company_name, careersUrl: job.url, title: job.title, description: job.description || '' } }));\n\nconst fromHimalayas = himalayasJobs\n  .filter(job => titleOk(job.title))\n  .map(job => ({\n    json: {\n      name: job.companyName || 'Unknown (Himalayas)',\n      careersUrl: job.companySlug\n        ? `https://himalayas.app/companies/${job.companySlug}`\n        : `https://himalayas.app/jobs?q=${encodeURIComponent(job.companyName || job.title)}`,\n      title: job.title,\n      description: job.excerpt || ''\n    }\n  }));\n\nreturn [...fromRemoteOk, ...fromRemotive, ...fromHimalayas];"
+        "jsCode": "const allInput = $input.all();\n\nlet remoteOkJobs = [];\nlet remotiveJobs = [];\nlet himalayasJobs = [];\nlet workingNomadsJobs = [];\nlet wwrJobs = [];\nlet jobicyJobs = [];\nlet arbeitnowJobs = [];\nlet joobleJobs = [];\nlet findworkJobs = [];\nlet reedJobs = [];\nlet adzunaJobs = [];\nlet startupJobsItems = [];\nlet remoteLandersJobs = [];\nlet hnStory = null;\n\nfor (const item of allInput) {\n  const data = item.json;\n\n  if (data.company) {\n    remoteOkJobs.push(data);\n\n  } else if (data.jobs && Array.isArray(data.jobs)) {\n    const firstJob = data.jobs[0] || {};\n    if (firstJob.applyUrl !== undefined && firstJob.slug !== undefined) {\n      remoteLandersJobs = data.jobs;\n    } else if (firstJob.jobTitle !== undefined) {\n      jobicyJobs = data.jobs;\n    } else if (firstJob.snippet !== undefined && firstJob.link !== undefined) {\n      joobleJobs = data.jobs;\n    } else if (firstJob.companyName !== undefined) {\n      himalayasJobs = data.jobs;\n    } else {\n      remotiveJobs = data.jobs;\n    }\n\n  } else if (data.results && Array.isArray(data.results)) {\n    const firstResult = data.results[0] || {};\n    if (firstResult.jobTitle !== undefined && firstResult.employerName !== undefined) {\n      reedJobs = data.results;\n    } else if (firstResult.redirect_url !== undefined) {\n      adzunaJobs = data.results;\n    } else if (firstResult.role !== undefined) {\n      findworkJobs = data.results;\n    }\n\n  } else if (data.data && Array.isArray(data.data)) {\n    arbeitnowJobs = data.data;\n\n  } else if (data.company_name !== undefined && data.url !== undefined) {\n    workingNomadsJobs.push(data);\n\n  } else if (data.children !== undefined && Array.isArray(data.children) && data.type === 'story') {\n    hnStory = data;\n\n  } else if (data.guid !== undefined && data.isoDate !== undefined) {\n    if (data.categories !== undefined && Array.isArray(data.categories)) {\n      startupJobsItems.push(data);\n    } else {\n      wwrJobs.push(data);\n    }\n  }\n}\n\nconst CUTOFF_DAYS = 30;\nconst cutoffMs = Date.now() - CUTOFF_DAYS * 24 * 60 * 60 * 1000;\n\nfunction isFresh(dateValue) {\n  if (dateValue === undefined || dateValue === null || dateValue === '') return true; // fail open if no date available\n  const t = new Date(dateValue).getTime();\n  if (isNaN(t)) return true; // fail open if unparseable\n  return t >= cutoffMs;\n}\n\nfunction titleOk(title) {\n  const t = (title || '').toLowerCase();\n  const senior = /senior|staff|principal|director|manager/.test(t);\n  const relevant = /engineer|developer|full.?stack|frontend|backend/.test(t);\n  return !senior && relevant;\n}\n\nfunction stripHtml(text) {\n  return (text || '')\n    .replace(/<[^>]*>/g, ' ')\n    .replace(/&#x27;/g, \"'\")\n    .replace(/&quot;/g, '\"')\n    .replace(/&amp;/g, '&')\n    .replace(/&#x2F;/g, '/')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// ---- Original 5 sources ----\n\nconst fromRemoteOk = remoteOkJobs\n  .filter(job => job.company && (!job.location || job.location.trim() === '') && titleOk(job.position) && isFresh(job.date)) // \"date\" confirmed real tonight\n  .map(job => ({ json: { name: job.company, careersUrl: job.apply_url, title: job.position, description: job.description || '' } }));\n\nconst fromRemotive = remotiveJobs\n  .filter(job => titleOk(job.title)) // no freshness filter — field name never confirmed against real Remotive data\n  .map(job => ({ json: { name: job.company_name, careersUrl: job.url, title: job.title, description: job.description || '' } }));\n\nconst fromHimalayas = himalayasJobs\n  .filter(job => titleOk(job.title)) // no freshness filter — field name never confirmed against real Himalayas data\n  .map(job => ({\n    json: {\n      name: job.companyName || 'Unknown (Himalayas)',\n      careersUrl: job.applicationLink || job.guid || null,\n      title: job.title,\n      description: job.excerpt || ''\n    }\n  }));\n\nconst fromWorkingNomads = workingNomadsJobs\n  .filter(job => titleOk(job.title) && isFresh(job.pub_date)) // \"pub_date\" confirmed real via direct API fetch tonight\n  .map(job => ({\n    json: {\n      name: job.company_name || 'Unknown (Working Nomads)',\n      careersUrl: job.url,\n      title: job.title,\n      description: `Location: ${job.location || 'not specified'}\\n\\n${job.description || ''}`\n    }\n  }));\n\nconst fromWWR = wwrJobs\n  .filter(job => {\n    const parts = (job.title || '').split(':');\n    const positionTitle = parts.length > 1 ? parts.slice(1).join(':').trim() : job.title;\n    return titleOk(positionTitle) && isFresh(job.isoDate); // \"isoDate\" confirmed real in RSS output tonight\n  })\n  .map(job => {\n    const parts = (job.title || '').split(':');\n    const company = parts.length > 1 ? parts[0].trim() : 'Unknown (WWR)';\n    const positionTitle = parts.length > 1 ? parts.slice(1).join(':').trim() : job.title;\n    return {\n      json: {\n        name: company,\n        careersUrl: job.link,\n        title: positionTitle,\n        description: job.contentSnippet || ''\n      }\n    };\n  });\n\n// ---- 9 new sources ----\n\nconst fromJobicy = jobicyJobs\n  .filter(job => titleOk(job.jobTitle) && isFresh(job.pubDate)) // \"pubDate\" confirmed real via direct API fetch tonight\n  .map(job => ({\n    json: {\n      name: job.companyName || 'Unknown (Jobicy)',\n      careersUrl: job.url,\n      title: job.jobTitle,\n      description: job.jobExcerpt || job.jobDescription || ''\n    }\n  }));\n\nconst fromArbeitnow = arbeitnowJobs\n  .filter(job => job.remote === true && titleOk(job.title)) // no freshness filter — field name never confirmed against real Arbeitnow data\n  .map(job => ({\n    json: {\n      name: job.company_name || 'Unknown (Arbeitnow)',\n      careersUrl: job.url,\n      title: job.title,\n      description: job.description || ''\n    }\n  }));\n\nconst KNOWN_AGGREGATORS = ['powertofly', 'linkedin', 'indeed', 'ziprecruiter', 'glassdoor', 'monster', 'careerbuilder'];\n\nfunction isAggregatorName(name) {\n  const n = (name || '').toLowerCase();\n  return KNOWN_AGGREGATORS.some(agg => n.includes(agg));\n}\n\nconst fromJooble = joobleJobs\n  .filter(job => titleOk(job.title) && isFresh(job.updated)) // \"updated\" confirmed real in n8n output tonight — \"jobAge\" is NOT a real field, only appears inside the URL string\n  .map(job => {\n    const rawName = job.company || 'Unknown (Jooble)';\n    const name = isAggregatorName(rawName)\n      ? `Unclear — posted via ${rawName}, actual employer may differ (see description)`\n      : rawName;\n    return {\n      json: {\n        name,\n        careersUrl: job.link,\n        title: job.title,\n        description: job.snippet || ''\n      }\n    };\n  });\n\nconst fromFindwork = findworkJobs\n  .filter(job => titleOk(job.role)) // no date field ever identified for Findwork\n  .map(job => ({\n    json: {\n      name: job.company_name || 'Unknown (Findwork)',\n      careersUrl: job.url,\n      title: job.role,\n      description: job.text || (job.keywords ? job.keywords.join(', ') : '')\n    }\n  }));\n\nconst fromReed = reedJobs\n  .filter(job => titleOk(job.jobTitle)) // no freshness filter — field name documented but never confirmed against real Reed data\n  .map(job => ({\n    json: {\n      name: job.employerName || 'Unknown (Reed)',\n      careersUrl: job.jobUrl,\n      title: job.jobTitle,\n      description: `Location: ${job.locationName || 'not specified'}\\n\\n${job.jobDescription || ''}`\n    }\n  }));\n\nconst fromAdzuna = adzunaJobs\n  .filter(job => titleOk(job.title) && isFresh(job.created)) // \"created\" confirmed real via direct API fetch tonight\n  .map(job => ({\n    json: {\n      name: (job.company && job.company.display_name) || 'Unknown (Adzuna)',\n      careersUrl: job.redirect_url,\n      title: job.title,\n      description: `Location: ${(job.location && job.location.display_name) || 'not specified'}\\n\\n${job.description || ''}`\n    }\n  }));\n\nconst fromStartupJobs = startupJobsItems\n  .filter(job => {\n    const parts = (job.title || '').split(' at ');\n    const roleTitle = parts.length > 1 ? parts[0].trim() : job.title;\n    return titleOk(roleTitle) && isFresh(job.isoDate); // \"isoDate\" confirmed real in RSS output tonight\n  })\n  .map(job => {\n    const parts = (job.title || '').split(' at ');\n    const roleTitle = parts.length > 1 ? parts[0].trim() : job.title;\n    const company = parts.length > 1 ? parts.slice(1).join(' at ').trim() : 'Unknown (Startup Jobs)';\n    return {\n      json: {\n        name: company,\n        careersUrl: job.link,\n        title: roleTitle,\n        description: job.contentSnippet || ''\n      }\n    };\n  });\n\nconst fromRemoteLanders = remoteLandersJobs\n  .filter(job => job.location === 'Worldwide' && titleOk(job.title) && isFresh(job.postedDate)) // \"postedDate\" confirmed real in official API docs tonight\n  .map(job => ({\n    json: {\n      name: job.company || 'Unknown (Remote Landers)',\n      careersUrl: job.applyUrl || job.url,\n      title: job.title,\n      description: `${job.level ? 'Level: ' + job.level + '. ' : ''}${job.salary ? 'Salary: ' + job.salary + '. ' : ''}`.trim()\n    }\n  }));\n\nconst fromHN = (hnStory && Array.isArray(hnStory.children) ? hnStory.children : [])\n  .filter(job => job.text) // always current month by construction — no separate freshness check needed\n  .map(job => ({ clean: stripHtml(job.text), raw: job }))\n  .filter(j => titleOk(j.clean))\n  .map(j => {\n    const parts = j.clean.split('|').map(p => p.trim());\n    const company = parts.length > 1 ? parts[0] : 'Unknown (HN Who Is Hiring)';\n    const roleTitle = parts.length > 1 ? parts[1] : j.clean.slice(0, 80);\n    return {\n      json: {\n        name: company,\n        careersUrl: `https://news.ycombinator.com/item?id=${j.raw.id}`,\n        title: roleTitle,\n        description: j.clean\n      }\n    };\n  });\n\nreturn [\n  ...fromRemoteOk,\n  ...fromRemotive,\n  ...fromHimalayas,\n  ...fromWorkingNomads,\n  ...fromWWR,\n  ...fromJobicy,\n  ...fromArbeitnow,\n  ...fromJooble,\n  ...fromFindwork,\n  ...fromReed,\n  ...fromAdzuna,\n  ...fromStartupJobs,\n  ...fromRemoteLanders,\n  ...fromHN\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -608,
-        -160
+        240,
+        -416
       ],
       "id": "309802b5-f318-4217-8b2e-4f4e970b2288",
       "name": "Filter Real Jobs"
@@ -271,8 +264,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -400,
-        -160
+        240,
+        -224
       ],
       "credentials": {
         "httpCustomAuth": {
@@ -289,8 +282,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -176,
-        -144
+        448,
+        -224
       ],
       "id": "6627a12e-2db9-4876-9c9f-4f62d3447953",
       "name": "Skip Already-Checked"
@@ -303,8 +296,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        -848,
-        -208
+        -912,
+        -224
       ],
       "id": "e8aa1314-4e1d-45f4-8be3-266b90cd74ce",
       "name": "Remotive Fetch"
@@ -317,11 +310,214 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        -848,
-        -16
+        -912,
+        -48
       ],
       "id": "b09e0aec-689f-48d7-921d-4f62dcd4134b",
       "name": "Himalayas Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://www.workingnomads.co/api/exposed_jobs/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        144
+      ],
+      "id": "32b23f20-09a7-41d5-a85f-8be527916da8",
+      "name": "Working Nomads Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -912,
+        336
+      ],
+      "id": "2a99bf24-f846-4e94-962b-d12f3b920cd2",
+      "name": "We Work Remotely Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://jobicy.com/api/v2/remote-jobs?count=100&geo=anywhere&industry=engineering",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        -576
+      ],
+      "id": "44d55bb1-88b1-4fac-95af-91e247b3e536",
+      "name": "Jobicy Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://www.arbeitnow.com/api/job-board-api?remote=true",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        -736
+      ],
+      "id": "777d2134-2127-4ede-b56b-3ad03690f2bc",
+      "name": "Arbeitnow Fetch"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://jooble.org/api/885c4b3b-d207-41be-aa18-e33d1c1ae903",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "     {\n       \"keywords\": \"full stack developer\",\n       \"location\": \"remote\"\n     }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        496
+      ],
+      "id": "89b0e97e-250d-4316-8b8d-6cccfa1a1791",
+      "name": "Jooble Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://findwork.dev/api/jobs/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Token ddf9636743d13f1ecc0a137528b918e6c686d3a9"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        -928
+      ],
+      "id": "752a7a7f-5323-4453-b40a-a85afe759866",
+      "name": "Findwork Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://www.reed.co.uk/api/1.0/search?keywords=full%20stack%20developer&resultsToTake=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Basic N2MzMTY1MDgtNzFlYS00OWQ5LWI2NGYtM2UwNTQ0MTVlZDU2Og=="
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        672
+      ],
+      "id": "0b3cae08-03e1-4fb2-8df0-034f39fea1d2",
+      "name": "Reed Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://api.adzuna.com/v1/api/jobs/gb/search/1?app_id=ea41c3e2&app_key=ad4daf26a9acacbbd7095b40d3b64749&results_per_page=50&what=full%20stack%20developer%20remote",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -912,
+        880
+      ],
+      "id": "bdb8eea3-b35c-482d-9af6-79aeb2798440",
+      "name": "Adzuna Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -928,
+        -1104
+      ],
+      "id": "69eba136-d023-4c61-83fd-5e65bb3444a4",
+      "name": "HN Who Is Hiring - Find Thread"
+    },
+    {
+      "parameters": {
+        "url": "=https://hn.algolia.com/api/v1/items/{{ $json.storyId }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -32,
+        -768
+      ],
+      "id": "8f7ffc26-78f9-4c0f-ba79-cf7be877c29d",
+      "name": "HN Who Is Hiring - Fetch Comments"
+    },
+    {
+      "parameters": {
+        "jsCode": "const storyId = $input.first().json.hits[0].objectID;\nreturn [{ json: { storyId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        -1040
+      ],
+      "id": "4d92d48c-16bb-449f-88ad-693f553fbf11",
+      "name": "Extract Thread ID"
+    },
+    {
+      "parameters": {
+        "url": "https://remotelanders.com/api/jobs?category=Engineering&limit=100",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -928,
+        -1280
+      ],
+      "id": "c09696e9-cb07-4521-a0bf-18dea84d5862",
+      "name": "Remote Landers Fetch"
+    },
+    {
+      "parameters": {
+        "url": "https://startup.jobs/feeds/jobs?role=engineering&workplace=remote",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        -928,
+        -1456
+      ],
+      "id": "a169e8c5-bec2-438e-bcf8-effdac9d5f22",
+      "name": "Startup Jobs Fetch"
     }
   ],
   "pinData": {},
@@ -343,6 +539,61 @@
             "node": "Himalayas Fetch",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Working Nomads Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "We Work Remotely Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Jobicy Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Arbeitnow Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Findwork Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Jooble Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reed Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Adzuna Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HN Who Is Hiring - Find Thread",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remote Landers Fetch",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Startup Jobs Fetch",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -361,11 +612,6 @@
     "Keep Only MATCH / UNCLEAR": {
       "main": [
         [
-          {
-            "node": "Supabase - Store Result",
-            "type": "main",
-            "index": 0
-          },
           {
             "node": "Build Report Text",
             "type": "main",
@@ -389,7 +635,7 @@
       "main": [
         [
           {
-            "node": "Update a document",
+            "node": "Slack - Send Notification",
             "type": "main",
             "index": 0
           }
@@ -403,6 +649,11 @@
             "node": "Keep Only MATCH / UNCLEAR",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Supabase - Store Result",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -412,17 +663,6 @@
         [
           {
             "node": "Parse Final Verdict",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Update a document": {
-      "main": [
-        [
-          {
-            "node": "Slack - Send Notification",
             "type": "main",
             "index": 0
           }
@@ -494,6 +734,149 @@
           }
         ]
       ]
+    },
+    "Working Nomads Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "We Work Remotely Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jobicy Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Arbeitnow Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Findwork Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jooble Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reed Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adzuna Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HN Who Is Hiring - Find Thread": {
+      "main": [
+        [
+          {
+            "node": "Extract Thread ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Thread ID": {
+      "main": [
+        [
+          {
+            "node": "HN Who Is Hiring - Fetch Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HN Who Is Hiring - Fetch Comments": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote Landers Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Startup Jobs Fetch": {
+      "main": [
+        [
+          {
+            "node": "Filter Real Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -501,7 +884,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "235e2ed1-578c-4eb9-a6f3-24457c7e94c3",
+  "versionId": "50a89da6-f5fa-402e-8613-40bbcf658f78",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "a5dd9b336671e659366774e67e75f51dcc2e039066556d7e72f0bc6819c268e6"
